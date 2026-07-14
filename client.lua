@@ -36,13 +36,22 @@ local function norm(vec)
     return vector3(vec.x / len, vec.y / len, vec.z / len)
 end
 
+-- Invalid / load-fail models yaad rakho -> ek hi baar log ho (spam guard).
+-- (proximity manager har cycle retry karta tha; roninb jaisa missing ped
+--  har 400ms F8 spam kar raha tha. Ab hash yaad rehta hai -> sirf ek line.)
+local invalidModels = {}
+
 -- Safe model load: crash ke bajaye timeout pe nil return karta hai.
 -- (lib.requestModel timeout pe ERROR throw karta hai — isliye native use kiya)
 local function loadModel(model)
     local hash = type(model) == 'number' and model or joaat(model)
 
-    -- Model game/server me hai hi nahi -> turant skip (F8 me log)
+    -- Pehle hi invalid mark ho chuka hai -> chup-chaap skip (koi dobara log nahi)
+    if invalidModels[hash] then return nil end
+
+    -- Model game/server me hai hi nahi -> turant skip (F8 me ek baar log)
     if not IsModelInCdimage(hash) or not IsModelValid(hash) then
+        invalidModels[hash] = true
         print(('^3[ped_spawner]^7 SKIP ^1invalid^7 ped: ^5%s^7 (hash %s) — game/server me nahi hai'):format(tostring(model), hash))
         return nil
     end
@@ -54,7 +63,8 @@ local function loadModel(model)
         Wait(10)
         tries = tries + 1
         if tries > maxTries then
-            -- cdimage me hai par stream nahi hua -> skip (F8 me log)
+            -- cdimage me hai par stream nahi hua -> skip (F8 me ek baar log)
+            invalidModels[hash] = true
             print(('^3[ped_spawner]^7 SKIP ^1load-timeout^7 ped: ^5%s^7 (hash %s) — stream nahi hua'):format(tostring(model), hash))
             return nil
         end
@@ -265,8 +275,11 @@ CreateThread(function()
             if dist2 < nearest2 then nearest2 = dist2 end
 
             local exists = s.ped and DoesEntityExist(s.ped)
-            if dist2 < spawnR2 and not exists then
+            if dist2 < spawnR2 and not exists and not s.invalid then
                 s.ped = createRealPed(s.model, s.x, s.y, s.z, s.w)  -- paas -> spawn
+                -- Model invalid/load-fail -> is entry ko permanently skip karo
+                -- (warna har cycle retry + F8 spam). Log loadModel me ek baar ho chuka.
+                if not s.ped then s.invalid = true end
             elseif dist2 >= spawnR2 and exists then
                 DeletePed(s.ped); s.ped = nil                        -- door -> despawn
             end
